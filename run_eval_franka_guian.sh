@@ -59,13 +59,11 @@ CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python run_guian_eval.py \
   --lora_rank 32 \
   --num_trials $NUM_TRIALS \
   --max_timesteps $MAX_TIMESTEPS \
+  --num_open_loop_steps 8 \
   --control_mode eef \
-  --use_custom_unnormalization True \
-  --action_bounds_name $UNNORM_KEY \
+  --use_custom_unnormalization False \
   --save_video True \
   --show_cameras True \
-  --position_scale 1.0 \
-  --rotation_scale 1.0 \
   # --action_bounds_name pick_test_cube_in_cup \
   # --center_crop True \
   # --use_mock_robot True \

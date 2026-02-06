@@ -72,7 +72,7 @@ from experiments.robot.robot_utils import (
     normalize_gripper_action,
     set_seed_everywhere,
 )
-from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM
+from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM, ACTION_DIM
 
 # Import local modules
 import camera_utils
@@ -482,36 +482,55 @@ def crop_right_square(image: Image.Image) -> Image.Image:
 
     return cropped
 
-def prepare_observation(external_img, wrist_img, robot, resize_size):
-    """Prepare observation for policy input."""
+def prepare_observation(external_img, wrist_img, robot, resize_size, use_ee_pose_proprio=False):
+    """Prepare observation for policy input.
+
+    Args:
+        use_ee_pose_proprio: If True, use EE pose [x,y,z,qw,qx,qy,qz,gripper] as proprio
+                             instead of joint positions [j1,...,j7,gripper].
+                             Required for models trained with absolute EE pose actions (8D).
+    """
     # Convert BGR to RGB
     log_message("Preparing observation...", None)
     external_img_rgb = cv2.cvtColor(external_img, cv2.COLOR_BGR2RGB)
     external_img_rgb_pil = Image.fromarray(external_img_rgb)
     external_img_rgb_pil = crop_right_square(external_img_rgb_pil)
     external_img_rgb = np.array(external_img_rgb_pil)
-    
+
     # Resize external image
     from experiments.robot.openvla_utils import resize_image_for_policy
     external_img_resized = resize_image_for_policy(external_img_rgb, resize_size)
-    
+
     # Handle wrist image if present
     wrist_img_resized = None
     if wrist_img is not None:
         wrist_img_rgb = cv2.cvtColor(wrist_img, cv2.COLOR_BGR2RGB)
         wrist_img_resized = resize_image_for_policy(wrist_img_rgb, resize_size)
-    
+
     # Get robot state
-    joint_pos = robot.get_joint_positions()
-    gripper_pos = robot.get_gripper_position()
-    
+    if use_ee_pose_proprio:
+        # EE pose proprio: [x, y, z, qw, qx, qy, qz, gripper] (8D)
+        # Robot returns [x, y, z, qx, qy, qz, qw] (x-first quaternion)
+        ee_pose = robot.get_ee_pose()  # [x, y, z, qx, qy, qz, qw]
+        gripper_pos = robot.get_gripper_position()  # [gripper_width]
+        # Convert quaternion from robot (xyzw) to model (wxyz): [x,y,z,qw,qx,qy,qz,gripper]
+        pos = ee_pose[:3]
+        quat_xyzw = ee_pose[3:7]  # [qx, qy, qz, qw]
+        quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [qw, qx, qy, qz]
+        state = np.concatenate([pos, quat_wxyz, gripper_pos])
+    else:
+        # Joint position proprio: [j1, ..., j7, gripper] (8D)
+        joint_pos = robot.get_joint_positions()
+        gripper_pos = robot.get_gripper_position()
+        state = np.concatenate([joint_pos, gripper_pos])
+
     # Prepare observation dict
     observation = {
         "full_image": external_img_resized,
         "wrist_image": wrist_img_resized,
-        "state": np.concatenate([joint_pos, gripper_pos]),
+        "state": state,
     }
-    
+
     return observation, external_img_rgb
 
 
@@ -584,8 +603,10 @@ def run_episode(
                 break
             
             # Prepare observation
+            # Use EE pose proprio for 8D action models (CUP platform)
             observation, external_img_rgb = prepare_observation(
-                external_img, wrist_img, robot, resize_size
+                external_img, wrist_img, robot, resize_size,
+                use_ee_pose_proprio=(ACTION_DIM == 8)
             )
             
             # Save frame for video
@@ -630,8 +651,10 @@ def run_episode(
                     log_message(f"     Action chunk shape: {np.array(actions).shape}", log_file)
                     log_message(f"     First action: {actions[0]}", log_file)
                     log_message(f"     Action range: [{np.min(actions):.3f}, {np.max(actions):.3f}]", log_file)
-                    log_message(f"     Expected: [dx, dy, dz, droll, dpitch, dyaw, gripper]", log_file)
-                    log_message(f"     Note: Rotation is RPY (roll-pitch-yaw) format\n", log_file)
+                    if np.array(actions).shape[-1] == 8:
+                        log_message(f"     Format: [x, y, z, qw, qx, qy, qz, gripper] (ABSOLUTE POSE)", log_file)
+                    else:
+                        log_message(f"     Format: [dx, dy, dz, droll, dpitch, dyaw, gripper] (DELTA)", log_file)
                 
                 log_message(
                     f"  [Step {t_step:3d}] New action chunk | Inference: {inference_time:.1f}ms",
@@ -644,70 +667,97 @@ def run_episode(
             # Process action (inverts gripper if OpenVLA)
             action = process_action(action, cfg)
             print("Raw action:", action)
-            # Unnormalize action if using custom bounds
-            if cfg.use_custom_unnormalization and unnormalizer is not None:
-                # Action is in [-1, 1] range, unnormalize to physical units
-                action_unnormalized = unnormalizer.unnormalize(action)
-                print("Unnormalized action:", action_unnormalized)
-                
-                # Debug: Print unnormalization on first step
+
+            # Detect action format: 8D = absolute pose, 7D = delta
+            is_absolute_pose = (len(action) == 8)
+
+            if is_absolute_pose:
+                # ============================================================
+                # 8D ABSOLUTE POSE: [x, y, z, qw, qx, qy, qz, gripper]
+                # Model already unnormalized via norm_stats (q01/q99)
+                # ============================================================
+                target_position = action[:3]
+                quat_wxyz = action[3:7]  # w-first: [qw, qx, qy, qz]
+                # Convert to robot/scipy convention: [qx, qy, qz, qw]
+                quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
+                target_ee_pose = np.concatenate([target_position, quat_xyzw])
+                gripper_cmd = action[7]
+                ee_delta = np.zeros(6)  # For logging compatibility
+
                 if t_step == 0:
-                    log_message(f"\n  🔧 UNNORMALIZATION DEBUG:", log_file)
-                    log_message(f"     Normalized action:   {action}", log_file)
-                    log_message(f"     Unnormalized action: {action_unnormalized}", log_file)
-                    log_message(f"     Position delta (m):  [{action_unnormalized[0]:.4f}, {action_unnormalized[1]:.4f}, {action_unnormalized[2]:.4f}]", log_file)
-                    log_message(f"     Rotation delta (rad): [{action_unnormalized[3]:.4f}, {action_unnormalized[4]:.4f}, {action_unnormalized[5]:.4f}]", log_file)
-                    log_message(f"     Gripper:             {action_unnormalized[6]:.2f}\n", log_file)
-                
-                # Use unnormalized action (already in physical units)
-                ee_delta = action_unnormalized[:6]
-                gripper_cmd = action_unnormalized[6]
+                    log_message(f"\n  ABSOLUTE POSE ACTION (8D):", log_file)
+                    log_message(f"     Position: [{target_position[0]:.4f}, {target_position[1]:.4f}, {target_position[2]:.4f}]", log_file)
+                    log_message(f"     Quat (model wxyz): [{quat_wxyz[0]:.4f}, {quat_wxyz[1]:.4f}, {quat_wxyz[2]:.4f}, {quat_wxyz[3]:.4f}]", log_file)
+                    log_message(f"     Quat (robot xyzw): [{quat_xyzw[0]:.4f}, {quat_xyzw[1]:.4f}, {quat_xyzw[2]:.4f}, {quat_xyzw[3]:.4f}]", log_file)
+                    log_message(f"     Gripper: {gripper_cmd:.4f}", log_file)
             else:
-                # Parse action: [6D end-effector delta (xyz + RPY), 1 gripper]
-                # Action is in [-1, 1] range, will be scaled by position_scale and rotation_scale
-                ee_delta = action[:6]
-                gripper_cmd = action[6]
-            
+                # ============================================================
+                # 7D DELTA: [dx, dy, dz, droll, dpitch, dyaw, gripper]
+                # ============================================================
+                if cfg.use_custom_unnormalization and unnormalizer is not None:
+                    # Action is in [-1, 1] range, unnormalize to physical units
+                    action_unnormalized = unnormalizer.unnormalize(action)
+                    print("Unnormalized action:", action_unnormalized)
+
+                    if t_step == 0:
+                        log_message(f"\n  UNNORMALIZATION DEBUG (7D DELTA):", log_file)
+                        log_message(f"     Normalized action:   {action}", log_file)
+                        log_message(f"     Unnormalized action: {action_unnormalized}", log_file)
+
+                    ee_delta = action_unnormalized[:6]
+                    gripper_cmd = action_unnormalized[6]
+                else:
+                    ee_delta = action[:6]
+                    gripper_cmd = action[6]
+
             # Debug: Print action details periodically
             if t_step % 10 == 0:
-                log_message(
-                    f"  [Step {t_step:3d}] Action: pos_delta={ee_delta[:3]}, "
-                    f"rot_delta={ee_delta[3:6]}, gripper={gripper_cmd:.2f}",
-                    log_file
-                )
-            
+                if is_absolute_pose:
+                    log_message(
+                        f"  [Step {t_step:3d}] Target pose: pos={target_ee_pose[:3]}, "
+                        f"gripper={gripper_cmd:.4f}",
+                        log_file
+                    )
+                else:
+                    log_message(
+                        f"  [Step {t_step:3d}] Action: pos_delta={ee_delta[:3]}, "
+                        f"rot_delta={ee_delta[3:6]}, gripper={gripper_cmd:.2f}",
+                        log_file
+                    )
+
             # Execute action
             if cfg.control_mode == "eef":
-                # Get current EE pose
-                if target_ee_pose is None:
-                    current_ee_pose = robot.get_ee_pose()  # [x, y, z, qx, qy, qz, qw]
+                if is_absolute_pose:
+                    # Absolute pose: target_ee_pose already set above
+                    pass
                 else:
-                    current_ee_pose = target_ee_pose
-                
-                if cfg.use_custom_unnormalization and unnormalizer is not None:
-                    # ee_delta is already in physical units, apply directly
-                    target_ee_pose = apply_delta_pose(
-                        current_ee_pose,
-                        ee_delta,
-                        position_scale=1.0,  # No additional scaling needed
-                        rotation_scale=1.0,   # No additional scaling needed
-                        # rotation_scale=0.0   # debugging
-                        current_gripper = robot.get_joint_positions_w_gripper()[-1]
-                    )
-                else:
-                    # ee_delta is in [-1, 1] range, apply scaling
-                    target_ee_pose = apply_delta_pose(
-                        current_ee_pose,
-                        ee_delta,
-                        position_scale=cfg.position_scale,
-                        rotation_scale=cfg.rotation_scale,
-                        current_gripper = robot.get_joint_positions_w_gripper()[-1]
-                    )
-                
+                    # Delta pose: compute target from current + delta
+                    if target_ee_pose is None:
+                        current_ee_pose = robot.get_ee_pose()  # [x, y, z, qx, qy, qz, qw]
+                    else:
+                        current_ee_pose = target_ee_pose
+
+                    if cfg.use_custom_unnormalization and unnormalizer is not None:
+                        target_ee_pose = apply_delta_pose(
+                            current_ee_pose,
+                            ee_delta,
+                            position_scale=1.0,
+                            rotation_scale=1.0,
+                            current_gripper = robot.get_joint_positions_w_gripper()[-1]
+                        )
+                    else:
+                        target_ee_pose = apply_delta_pose(
+                            current_ee_pose,
+                            ee_delta,
+                            position_scale=cfg.position_scale,
+                            rotation_scale=cfg.rotation_scale,
+                            current_gripper = robot.get_joint_positions_w_gripper()[-1]
+                        )
+
                 # Read current joint positions BEFORE sending new target
                 current_joint_positions = robot.get_joint_positions_w_gripper()
                 action_log.append(list(current_joint_positions))
-                
+
                 # Send target pose to robot
                 print(f"Target EE Pose: {target_ee_pose}")
                 robot.update_desired_ee_pose(target_ee_pose)
@@ -716,12 +766,18 @@ def run_episode(
                     log_message("  ⚠️  WARNING: Joint control mode not fully implemented!", log_file)
             
             # Process gripper command with 2-step confirmation
-            # After unnormalization: gripper is in [0, 1] range where 0=close, 1=open
             # Franka: control_gripper(True) = close, control_gripper(False) = open
             # Require 2 consecutive steps with same command before changing state
-            
-            desired_gripper_close = bool(gripper_cmd < 0.7)  # 0=close (True), 1=open (False)
-            print('desired_gripper_close:', desired_gripper_close)
+            if is_absolute_pose:
+                # Absolute gripper width (meters): ~0.048=close, ~0.106=open
+                # Threshold at midpoint of our data range
+                gripper_threshold = 0.07
+                desired_gripper_close = bool(gripper_cmd < gripper_threshold)
+            else:
+                # Normalized gripper [0, 1]: 0=close, 1=open
+                gripper_threshold = 0.7
+                desired_gripper_close = bool(gripper_cmd < gripper_threshold)
+            print(f'desired_gripper_close: {desired_gripper_close} (gripper_cmd={gripper_cmd:.4f}, threshold={gripper_threshold})')
             
             # Directly apply gripper command without dual timestep confirmation
             # current_gripper_state = desired_gripper_close
@@ -729,7 +785,7 @@ def run_episode(
 
             # Check if this is the second consecutive step with the same command
             if prev_gripper_cmd is not None:
-                prev_desired_close = bool(prev_gripper_cmd < 0.7)
+                prev_desired_close = bool(prev_gripper_cmd < gripper_threshold)
                 
                 # If both current and previous command agree, update gripper state
                 if desired_gripper_close == prev_desired_close:

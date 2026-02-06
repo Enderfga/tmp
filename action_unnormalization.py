@@ -112,6 +112,7 @@ AVAILABLE_BOUNDS = {
     "libero_spatial": LIBERO_SPATIAL_BOUNDS,
     "pick_cup_green_plate": PICK_CUP_GREEN_PLATE,
     "pick_test_cube_in_cup": PICK_TEST_CUBE_IN_CUP,
+    "orange_cube_train_temporal_aligned": GUIAN_SPATIAL_BOUNDS,
 }
 
 # Default bounds to use
