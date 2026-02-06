@@ -715,13 +715,30 @@ def run_episode(
                 max_pos_delta = 0.02  # meters
                 pos_delta_clipped = np.clip(pos_delta, -max_pos_delta, max_pos_delta)
 
-                # For rotation: interpolate toward target orientation
-                # Use current + small step toward predicted
-                current_rot = R.from_quat(current_ee_pose[3:7])  # scipy: [qx,qy,qz,qw]
-                predicted_rot = R.from_quat(quat_xyzw)
-                # Slerp: interpolate 20% toward target each step
-                slerp = Slerp([0, 1], R.concatenate([current_rot, predicted_rot]))
-                target_rot = slerp(0.2)
+                # For rotation: clip to max degrees per step
+                max_rot_per_step = np.radians(2.0)  # 2 degrees max per step
+
+                # Normalize predicted quaternion
+                quat_xyzw_norm = quat_xyzw / np.linalg.norm(quat_xyzw)
+                current_quat = current_ee_pose[3:7]  # [qx, qy, qz, qw]
+
+                # Ensure shortest path (flip if dot product < 0)
+                if np.dot(current_quat, quat_xyzw_norm) < 0:
+                    quat_xyzw_norm = -quat_xyzw_norm
+
+                current_rot = R.from_quat(current_quat)
+                predicted_rot = R.from_quat(quat_xyzw_norm)
+
+                # Compute angle difference
+                rot_diff = current_rot.inv() * predicted_rot
+                angle_diff = rot_diff.magnitude()  # radians
+
+                if angle_diff > 1e-6:
+                    t = min(1.0, max_rot_per_step / angle_diff)
+                    slerp = Slerp([0, 1], R.concatenate([current_rot, predicted_rot]))
+                    target_rot = slerp(t)
+                else:
+                    target_rot = current_rot
 
                 target_ee_pose = np.concatenate([
                     current_ee_pose[:3] + pos_delta_clipped,
@@ -734,8 +751,9 @@ def run_episode(
                     log_message(f"\n  ABSOLUTE->DELTA (8D):", log_file)
                     log_message(f"     Predicted pos:  {predicted_position}", log_file)
                     log_message(f"     Current pos:    {current_ee_pose[:3]}", log_file)
-                    log_message(f"     Raw delta:      {pos_delta} (norm={np.linalg.norm(pos_delta)*1000:.1f}mm)", log_file)
+                    log_message(f"     Pos delta:      {pos_delta} (norm={np.linalg.norm(pos_delta)*1000:.1f}mm)", log_file)
                     log_message(f"     Clipped delta:  {pos_delta_clipped}", log_file)
+                    log_message(f"     Rot diff:       {np.degrees(angle_diff):.1f} deg, slerp_t={t if angle_diff > 1e-6 else 0:.4f}", log_file)
                     log_message(f"     Gripper: {gripper_cmd:.4f}", log_file)
             else:
                 # ============================================================
