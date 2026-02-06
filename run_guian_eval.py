@@ -229,10 +229,16 @@ def initialize_model(cfg: FrankaEvalConfig):
     # Ensure "proprio" key exists in norm_stats (needed by get_vla_action)
     # For our model, proprio uses the same format as action, so reuse action stats
     if "proprio" not in model.norm_stats:
-        unnorm_key = cfg.unnorm_key or cfg.custom_unnorm_key
-        if unnorm_key and unnorm_key in model.norm_stats:
-            model.norm_stats["proprio"] = model.norm_stats[unnorm_key]
-            logger.info(f"  Added proprio norm_stats from '{unnorm_key}' (same format as action)")
+        logger.warning(f"  'proprio' not in model.norm_stats. Available keys: {list(model.norm_stats.keys())}")
+        # Try unnorm_key first, then custom_unnorm_key, then any available key
+        candidate_keys = [cfg.unnorm_key, cfg.custom_unnorm_key] + list(model.norm_stats.keys())
+        for key in candidate_keys:
+            if key and key in model.norm_stats:
+                model.norm_stats["proprio"] = model.norm_stats[key]
+                logger.info(f"  Added proprio norm_stats from '{key}'")
+                break
+        if "proprio" not in model.norm_stats:
+            logger.error("  FAILED to add proprio norm_stats! No valid keys found.")
 
     logger.info("✓ Model loaded successfully")
     logger.info(f"  Device: {next(model.parameters()).device}")
