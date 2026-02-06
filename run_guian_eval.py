@@ -50,7 +50,7 @@ import draccus
 import numpy as np
 import torch
 from moviepy import ImageSequenceClip
-from scipy.spatial.transform import Rotation as R
+from scipy.spatial.transform import Rotation as R, Slerp
 from PIL import Image
 
 # Add parent directory to path to import experiments modules
@@ -689,20 +689,44 @@ def run_episode(
                 # ============================================================
                 # 8D ABSOLUTE POSE: [x, y, z, qw, qx, qy, qz, gripper]
                 # Model already unnormalized via norm_stats (q01/q99)
+                # Convert to delta then clip for safe execution
                 # ============================================================
-                target_position = action[:3]
+                predicted_position = action[:3]
                 quat_wxyz = action[3:7]  # w-first: [qw, qx, qy, qz]
                 # Convert to robot/scipy convention: [qx, qy, qz, qw]
                 quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
-                target_ee_pose = np.concatenate([target_position, quat_xyzw])
+                predicted_ee_pose = np.concatenate([predicted_position, quat_xyzw])
                 gripper_cmd = action[7]
-                ee_delta = np.zeros(6)  # For logging compatibility
 
-                if t_step == 0:
-                    log_message(f"\n  ABSOLUTE POSE ACTION (8D):", log_file)
-                    log_message(f"     Position: [{target_position[0]:.4f}, {target_position[1]:.4f}, {target_position[2]:.4f}]", log_file)
-                    log_message(f"     Quat (model wxyz): [{quat_wxyz[0]:.4f}, {quat_wxyz[1]:.4f}, {quat_wxyz[2]:.4f}, {quat_wxyz[3]:.4f}]", log_file)
-                    log_message(f"     Quat (robot xyzw): [{quat_xyzw[0]:.4f}, {quat_xyzw[1]:.4f}, {quat_xyzw[2]:.4f}, {quat_xyzw[3]:.4f}]", log_file)
+                # Get current pose and compute safe delta
+                current_ee_pose = robot.get_ee_pose()  # [x, y, z, qx, qy, qz, qw]
+                pos_delta = predicted_position - current_ee_pose[:3]
+
+                # Clip position delta for safety (max 2cm per step)
+                max_pos_delta = 0.02  # meters
+                pos_delta_clipped = np.clip(pos_delta, -max_pos_delta, max_pos_delta)
+
+                # For rotation: interpolate toward target orientation
+                # Use current + small step toward predicted
+                current_rot = R.from_quat(current_ee_pose[3:7])  # scipy: [qx,qy,qz,qw]
+                predicted_rot = R.from_quat(quat_xyzw)
+                # Slerp: interpolate 20% toward target each step
+                slerp = Slerp([0, 1], R.concatenate([current_rot, predicted_rot]))
+                target_rot = slerp(0.2)
+
+                target_ee_pose = np.concatenate([
+                    current_ee_pose[:3] + pos_delta_clipped,
+                    target_rot.as_quat()  # [qx, qy, qz, qw]
+                ])
+
+                ee_delta = np.concatenate([pos_delta_clipped, np.zeros(3)])  # For logging
+
+                if t_step == 0 or t_step % 10 == 0:
+                    log_message(f"\n  ABSOLUTE->DELTA (8D):", log_file)
+                    log_message(f"     Predicted pos:  {predicted_position}", log_file)
+                    log_message(f"     Current pos:    {current_ee_pose[:3]}", log_file)
+                    log_message(f"     Raw delta:      {pos_delta} (norm={np.linalg.norm(pos_delta)*1000:.1f}mm)", log_file)
+                    log_message(f"     Clipped delta:  {pos_delta_clipped}", log_file)
                     log_message(f"     Gripper: {gripper_cmd:.4f}", log_file)
             else:
                 # ============================================================
@@ -742,7 +766,7 @@ def run_episode(
             # Execute action
             if cfg.control_mode == "eef":
                 if is_absolute_pose:
-                    # Absolute pose: target_ee_pose already set above
+                    # Absolute pose: target_ee_pose already computed above (delta-clipped)
                     pass
                 else:
                     # Delta pose: compute target from current + delta
