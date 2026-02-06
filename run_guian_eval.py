@@ -226,10 +226,18 @@ def initialize_model(cfg: FrankaEvalConfig):
         processor = get_processor(cfg)
         check_unnorm_key(cfg, model)
     
+    # Ensure "proprio" key exists in norm_stats (needed by get_vla_action)
+    # For our model, proprio uses the same format as action, so reuse action stats
+    if "proprio" not in model.norm_stats:
+        unnorm_key = cfg.unnorm_key or cfg.custom_unnorm_key
+        if unnorm_key and unnorm_key in model.norm_stats:
+            model.norm_stats["proprio"] = model.norm_stats[unnorm_key]
+            logger.info(f"  Added proprio norm_stats from '{unnorm_key}' (same format as action)")
+
     logger.info("✓ Model loaded successfully")
     logger.info(f"  Device: {next(model.parameters()).device}")
     logger.info(f"  Dtype: {next(model.parameters()).dtype}")
-    
+
     return model, action_head, proprio_projector, processor
 
 
