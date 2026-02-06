@@ -778,7 +778,8 @@ def get_vla_action(
         proprio = None
         if cfg.use_proprio:
             proprio = obs["state"]
-            proprio_norm_stats = vla.norm_stats[cfg.unnorm_key]["proprio"]
+            dataset_stats = vla.norm_stats[cfg.unnorm_key]
+            proprio_norm_stats = dataset_stats.get("proprio", dataset_stats["action"])
             obs["state"] = normalize_proprio(proprio, proprio_norm_stats)
             proprio = obs["state"]
 
