@@ -21,9 +21,10 @@ CUDA_DEVICE=0  # Which GPU to use
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/tube_ckpt/openvla-7b+pick_n_place_ee+b16+lr-5e-05+lora-r32+dropout-0.2--tube_noq99_nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--800_chkpt"
 
 # RL Posttrain ckpts
-CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt/orange_cube_exp4_temporal_aligned"
+CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt/orange_cube_exp4_temporal_aligned/"
 UNNORM_KEY="orange_cube_train_temporal_aligned"  # Your custom unnorm key
-
+# CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt/baseline/orange_cube_exp0_baseline"
+# UNNORM_KEY="orange_cube_robot_20"  # Your custom unnorm key
 # Camera serials (UPDATE THESE WITH YOUR CAMERA SERIALS)
 EXTERNAL_CAMERA="317222075319"
 #EXTERNAL_CAMERA="336222073740"
@@ -35,7 +36,7 @@ NUC_PORT=4242
 
 # Task instruction
 # INSTRUCTION="place the cube on the purple gear"
-INSTRUCTION="Pick up the orange cube and place it in the target location."
+INSTRUCTION="Pick up the orange cube and place it in the target location"
 # INSTRUCTION="Pick up the test cube with the orange cap and put it in the grey cup."
 
 # Evaluation settings
