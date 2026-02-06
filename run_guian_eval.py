@@ -602,7 +602,16 @@ def run_episode(
         log_message(f"Using SCALING unnormalization (pos={cfg.position_scale}, rot={cfg.rotation_scale})", log_file)
     
     log_message("Running episode... (Press Ctrl+C to stop early)", log_file)
-    
+
+    # Keep controller alive while waiting for first inference
+    # Send current pose as target to prevent controller timeout
+    current_pose = robot.get_ee_pose()
+    log_message(f"  Initial EE pose: {current_pose}", log_file)
+    for _ in range(20):
+        robot.update_desired_ee_pose(current_pose)
+        time.sleep(0.05)
+    log_message("  Controller keep-alive done", log_file)
+
     target_ee_pose = None
     try:
         for t_step in range(cfg.max_timesteps):
@@ -798,7 +807,23 @@ def run_episode(
 
                 # Send target pose to robot
                 print(f"Target EE Pose: {target_ee_pose}")
-                robot.update_desired_ee_pose(target_ee_pose)
+                try:
+                    robot.update_desired_ee_pose(target_ee_pose)
+                except Exception as e:
+                    log_message(f"  [Step {t_step}] Controller error: {e}", log_file)
+                    log_message(f"  Restarting controller...", log_file)
+                    try:
+                        Kx = np.array([750.0, 750.0, 750.0, 15.0, 15.0, 15.0])
+                        Kxd = np.array([37.0, 37.0, 37.0, 2.0, 2.0, 2.0])
+                        robot.start_cartesian_impedance(Kx=Kx, Kxd=Kxd)
+                        time.sleep(0.5)
+                        # Send current pose first to stabilize
+                        current_pose = robot.get_ee_pose()
+                        robot.update_desired_ee_pose(current_pose)
+                        log_message(f"  Controller restarted, resuming...", log_file)
+                    except Exception as e2:
+                        log_message(f"  Failed to restart controller: {e2}", log_file)
+                        break
             else:
                 if t_step == 0:
                     log_message("  ⚠️  WARNING: Joint control mode not fully implemented!", log_file)
