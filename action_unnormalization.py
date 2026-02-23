@@ -94,16 +94,17 @@ GUIAN_SPATIAL_BOUNDS = {
     "gripper_min": 0.0483,
     "gripper_max": 0.1062,
 }
-# Add your own bounds here:
-# MY_CUSTOM_BOUNDS = {
-#     "name": "my_dataset_name",
-#     "position_min": np.array([...], dtype=np.float32),
-#     "position_max": np.array([...], dtype=np.float32),
-#     "orientation_min": np.array([...], dtype=np.float32),
-#     "orientation_max": np.array([...], dtype=np.float32),
-#     "gripper_min": 0.0,
-#     "gripper_max": 1.0,
-# }
+# pick_n_place_ee — 25-episode Franka pick-and-place dataset
+# Bounds extracted from dataset_statistics.json (action: [dx, dy, dz, droll, dpitch, dyaw, gripper])
+PICK_N_PLACE_EE = {
+    "name": "pick_n_place_ee",
+    "position_min": np.array([-0.005163, -0.011432, -0.009680], dtype=np.float32),
+    "position_max": np.array([ 0.004788,  0.012703,  0.014425], dtype=np.float32),
+    "orientation_min": np.array([-0.015043, -0.031847, -0.007038], dtype=np.float32),
+    "orientation_max": np.array([ 0.019807,  0.016383,  0.005300], dtype=np.float32),
+    "gripper_min": 0.0,
+    "gripper_max": 1.0,
+}
 
 # Registry of all available bounds
 AVAILABLE_BOUNDS = {
@@ -113,6 +114,7 @@ AVAILABLE_BOUNDS = {
     "pick_cup_green_plate": PICK_CUP_GREEN_PLATE,
     "pick_test_cube_in_cup": PICK_TEST_CUBE_IN_CUP,
     "orange_cube_train_temporal_aligned": GUIAN_SPATIAL_BOUNDS,
+    "pick_n_place_ee": PICK_N_PLACE_EE,
 }
 
 # Default bounds to use
