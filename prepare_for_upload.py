@@ -26,7 +26,7 @@ from pathlib import Path
 from huggingface_hub import hf_hub_download
 
 # ── 配置 ─────────────────────────────────────────────────────────────────────
-BASE_REPO = "openvla/openvla-7b"
+BASE_REPO = "moojink/openvla-7b-oft-finetuned-libero-spatial"
 
 # 需要从 base model 补充的文件（fine-tuned ckpt 目录里没有的）
 BASE_FILES = [
@@ -35,10 +35,9 @@ BASE_FILES = [
     "modeling_prismatic.py",
     "generation_config.json",
     "model.safetensors.index.json",
-    "model-00001-of-00004.safetensors",
-    "model-00002-of-00004.safetensors",
-    "model-00003-of-00004.safetensors",
-    "model-00004-of-00004.safetensors",
+    "model-00001-of-00003.safetensors",
+    "model-00002-of-00003.safetensors",
+    "model-00003-of-00003.safetensors",
 ]
 
 # ckpt 目录的识别标志（至少满足一个）
@@ -60,16 +59,19 @@ def find_ckpt_dirs(ckpt_root: Path) -> list[Path]:
     return found
 
 
-def download_base_files(base_dir: Path) -> None:
-    """下载 base model 的共享文件到 base_dir/（只下载一次）。"""
+def download_base_files(base_dir: Path, force: bool = False) -> None:
+    """下载 base model 的共享文件到 base_dir/。force=True 时删除已有文件强制重下。"""
     base_dir.mkdir(parents=True, exist_ok=True)
     print(f"[1/3] Downloading base model files from {BASE_REPO}")
-    print(f"      → {base_dir}\n")
+    print(f"      → {base_dir}  (force={force})\n")
     for fname in BASE_FILES:
         dest = base_dir / fname
-        if dest.exists():
-            print(f"  skip (exists): {fname}")
-            continue
+        if dest.exists() or dest.is_symlink():
+            if not force:
+                print(f"  skip (exists): {fname}")
+                continue
+            dest.unlink()
+            print(f"  removed (force): {fname}")
         print(f"  downloading : {fname} ...", end=" ", flush=True)
         hf_hub_download(
             repo_id=BASE_REPO,
@@ -81,8 +83,8 @@ def download_base_files(base_dir: Path) -> None:
     print()
 
 
-def symlink_into_ckpts(ckpt_dirs: list[Path], base_dir: Path) -> None:
-    """对每个 ckpt 目录，为缺失的 base model 文件创建相对路径软链接。"""
+def symlink_into_ckpts(ckpt_dirs: list[Path], base_dir: Path, force: bool = False) -> None:
+    """对每个 ckpt 目录，为缺失的 base model 文件创建相对路径软链接。force=True 时重建所有软链接。"""
     print(f"[2/3] Creating symlinks in {len(ckpt_dirs)} checkpoint director(ies)")
     for ckpt_dir in ckpt_dirs:
         print(f"\n  {ckpt_dir.name}/")
@@ -90,8 +92,12 @@ def symlink_into_ckpts(ckpt_dirs: list[Path], base_dir: Path) -> None:
             src  = base_dir / fname
             link = ckpt_dir / fname
             if link.exists() or link.is_symlink():
-                print(f"    skip (exists): {fname}")
-                continue
+                if not force:
+                    print(f"    skip (exists): {fname}")
+                    continue
+                link.unlink()
+                print(f"    removed (force): {fname}")
+
             if not src.exists():
                 print(f"    WARN: base file not found, skip: {fname}")
                 continue
@@ -144,6 +150,11 @@ def main() -> None:
         default=Path.home() / "checkpoints",
         help="Directory containing the downloaded checkpoint subdirs (default: ~/checkpoints)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Delete and re-download base model files; rebuild all symlinks from scratch",
+    )
     args = parser.parse_args()
 
     ckpt_root: Path = args.ckpt_root.expanduser().resolve()
@@ -164,8 +175,8 @@ def main() -> None:
         print(f"  - {d.name}")
     print()
 
-    download_base_files(base_dir)
-    symlink_into_ckpts(ckpt_dirs, base_dir)
+    download_base_files(base_dir, force=args.force)
+    symlink_into_ckpts(ckpt_dirs, base_dir, force=args.force)
     verify(ckpt_dirs)
 
 
