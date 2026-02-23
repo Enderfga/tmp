@@ -35,9 +35,10 @@ BASE_FILES = [
     "modeling_prismatic.py",
     "generation_config.json",
     "model.safetensors.index.json",
-    "model-00001-of-00003.safetensors",
-    "model-00002-of-00003.safetensors",
-    "model-00003-of-00003.safetensors",
+    "model-00001-of-00004.safetensors",
+    "model-00002-of-00004.safetensors",
+    "model-00003-of-00004.safetensors",
+    "model-00004-of-00004.safetensors",
 ]
 
 # ckpt 目录的识别标志（至少满足一个）
