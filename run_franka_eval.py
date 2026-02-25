@@ -492,7 +492,7 @@ def prepare_observation(external_img, wrist_img, robot, resize_size):
     external_img_rgb = np.array(external_img_rgb_pil)
     
     # Resize external image
-    from experiments.robot.openvla_utils import resize_image_for_policy
+    from openvla_utils import resize_image_for_policy
     external_img_resized = resize_image_for_policy(external_img_rgb, resize_size)
     
     # Handle wrist image if present
