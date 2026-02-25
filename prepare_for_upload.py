@@ -1,19 +1,17 @@
 """
 prepare_for_upload.py
 
-在部署机器上，对已下载的 fine-tuned ckpt 目录自动补全 openvla-7b base model 文件。
+对 fine-tuned ckpt 目录自动补全 openvla-7b base model 文件 + OFT 架构代码。
+运行一次即可修复所有权重问题（自动清理旧的错误文件）。
 
 用法:
-    python3 prepare_for_upload.py --ckpt_root /home/guian/checkpoints
-
-也可以对 upload_hf 目录使用:
-    python3 prepare_for_upload.py --ckpt_root /home/guian/data/policy/openvla-oft/upload_hf
+    python3 prepare_for_upload.py --ckpt_root /home/guian/checkpoints --force
 
 脚本会：
-  1. 扫描 ckpt_root 下的所有 checkpoint 目录（识别标志：含 lora_adapter/ 或 dataset_statistics.json）
-  2. 从 HuggingFace 下载 openvla/openvla-7b 的 base model 权重到 ckpt_root/base_model_files/
-  3. 从本地 OFT 代码库复制 modeling_prismatic.py 和 configuration_prismatic.py（支持 action head）
-  4. 在每个 ckpt 目录内为缺失的文件创建相对路径软链接
+  1. 清理旧的错误文件（4-shard LIBERO 权重、过期 config 备份等）
+  2. 从 HuggingFace 下载 openvla/openvla-7b 的 base model 权重（3 shards）
+  3. 复制 deploy/ 目录下自带的 OFT 架构文件（modeling_prismatic.py, configuration_prismatic.py）
+  4. 在每个 ckpt 目录内创建软链接
 
 IMPORTANT: 训练时的 base model 是 openvla/openvla-7b (3 shards)，
            NOT moojink/openvla-7b-oft-finetuned-libero-spatial (4 shards)！
@@ -21,6 +19,7 @@ IMPORTANT: 训练时的 base model 是 openvla/openvla-7b (3 shards)，
 """
 
 import argparse
+import glob
 import os
 import shutil
 from pathlib import Path
@@ -29,7 +28,6 @@ from huggingface_hub import hf_hub_download
 # ── 配置 ─────────────────────────────────────────────────────────────────────
 
 # Base model: 必须与训练时一致！
-# LoRA adapter_config.json 中记录的 base_model_name_or_path 指向 openvla/openvla-7b
 BASE_REPO = "openvla/openvla-7b"
 
 # 从 HuggingFace Hub 下载的 base model 文件（权重 + 配置）
@@ -43,8 +41,7 @@ BASE_HF_FILES = [
     "model-00003-of-00003.safetensors",
 ]
 
-# OFT 架构文件：从本地 OFT 代码库复制（支持 action head / L1 regression）
-# 这些文件与 openvla/openvla-7b hub 上的版本不同！
+# OFT 架构文件：从 deploy/ 目录自身复制（自包含，无需外部依赖）
 OFT_CODE_FILES = [
     "modeling_prismatic.py",
     "configuration_prismatic.py",
@@ -53,11 +50,12 @@ OFT_CODE_FILES = [
 # 所有需要在 ckpt 目录中存在的文件
 ALL_BASE_FILES = BASE_HF_FILES + OFT_CODE_FILES
 
-# OFT 代码库中这两个文件的搜索路径
-OFT_CODE_SEARCH_DIRS = [
-    Path(__file__).parent.parent / "prismatic" / "extern" / "hf",  # relative to deploy/
-    Path("/home/guian/data/policy/openvla-oft/prismatic/extern/hf"),
-    Path("/raid/guian/policy/openvla-oft/prismatic/extern/hf"),
+# 需要清理的旧错误文件（来自之前错误使用 LIBERO 4-shard 权重）
+STALE_FILES = [
+    "model-00001-of-00004.safetensors",
+    "model-00002-of-00004.safetensors",
+    "model-00003-of-00004.safetensors",
+    "model-00004-of-00004.safetensors",
 ]
 
 # ckpt 目录的识别标志（至少满足一个）
@@ -66,6 +64,9 @@ CKPT_MARKERS = [
     "dataset_statistics.json",
 ]
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+DEPLOY_DIR = Path(__file__).parent.resolve()
 
 
 def find_ckpt_dirs(ckpt_root: Path) -> list[Path]:
@@ -79,25 +80,13 @@ def find_ckpt_dirs(ckpt_root: Path) -> list[Path]:
     return found
 
 
-def find_oft_code_dir() -> Path:
-    """找到本地 OFT 代码库中 modeling_prismatic.py 所在的目录。"""
-    for search_dir in OFT_CODE_SEARCH_DIRS:
-        if search_dir.exists() and (search_dir / "modeling_prismatic.py").exists():
-            return search_dir
-    raise FileNotFoundError(
-        f"Cannot find OFT modeling_prismatic.py in any of:\n"
-        + "\n".join(f"  - {d}" for d in OFT_CODE_SEARCH_DIRS)
-        + "\nPlease set OFT_CODE_SEARCH_DIRS in this script."
-    )
-
-
-def download_base_files(base_dir: Path, force: bool = False) -> None:
-    """下载 base model 权重和配置到 base_dir/。"""
+def download_and_prepare_base(base_dir: Path, force: bool = False) -> None:
+    """下载 base model 权重 + 复制 OFT 架构文件到 base_dir/。"""
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Download weights + config from HuggingFace
+    # ── Step 1: 下载 HF 权重 ──
     print(f"[1/4] Downloading base model weights from {BASE_REPO}")
-    print(f"      → {base_dir}  (force={force})\n")
+    print(f"      → {base_dir}\n")
     for fname in BASE_HF_FILES:
         dest = base_dir / fname
         if dest.exists() or dest.is_symlink():
@@ -105,7 +94,6 @@ def download_base_files(base_dir: Path, force: bool = False) -> None:
                 print(f"  skip (exists): {fname}")
                 continue
             dest.unlink()
-            print(f"  removed (force): {fname}")
         print(f"  downloading : {fname} ...", end=" ", flush=True)
         hf_hub_download(
             repo_id=BASE_REPO,
@@ -116,54 +104,52 @@ def download_base_files(base_dir: Path, force: bool = False) -> None:
         print("done")
     print()
 
-    # Step 2: Copy OFT architecture files from local codebase
-    print(f"[2/4] Copying OFT architecture files")
-    oft_dir = find_oft_code_dir()
-    print(f"      Source: {oft_dir}\n")
+    # ── Step 2: 从 deploy/ 目录复制 OFT 架构文件（自包含） ──
+    print(f"[2/4] Copying OFT architecture files from {DEPLOY_DIR}\n")
     for fname in OFT_CODE_FILES:
-        src = oft_dir / fname
+        src = DEPLOY_DIR / fname
         dest = base_dir / fname
+        if not src.exists():
+            print(f"  ERROR: {src} not found! Make sure {fname} is in the deploy/ directory.")
+            raise SystemExit(1)
         if dest.exists() or dest.is_symlink():
             if not force:
                 print(f"  skip (exists): {fname}")
                 continue
             dest.unlink()
-            print(f"  removed (force): {fname}")
-        if not src.exists():
-            print(f"  WARN: not found in OFT codebase: {src}")
-            continue
         shutil.copy2(src, dest)
         print(f"  copied: {fname}")
     print()
 
 
-def symlink_into_ckpts(ckpt_dirs: list[Path], base_dir: Path, force: bool = False) -> None:
-    """对每个 ckpt 目录，为缺失的 base model 文件创建相对路径软链接。"""
-    print(f"[3/4] Creating symlinks in {len(ckpt_dirs)} checkpoint director(ies)")
+def clean_and_link(ckpt_dirs: list[Path], base_dir: Path, force: bool = False) -> None:
+    """清理旧文件 + 创建新软链接。"""
+    print(f"[3/4] Cleaning stale files & creating symlinks in {len(ckpt_dirs)} checkpoint(s)")
     for ckpt_dir in ckpt_dirs:
         print(f"\n  {ckpt_dir.name}/")
 
-        # First: remove stale symlinks to old 4-shard files
-        for old_shard in [
-            "model-00001-of-00004.safetensors",
-            "model-00002-of-00004.safetensors",
-            "model-00003-of-00004.safetensors",
-            "model-00004-of-00004.safetensors",
-        ]:
-            old_link = ckpt_dir / old_shard
-            if old_link.is_symlink() or old_link.exists():
-                old_link.unlink()
-                print(f"    removed stale 4-shard file: {old_shard}")
+        # ── 清理旧的 4-shard 文件 ──
+        for old_shard in STALE_FILES:
+            old_path = ckpt_dir / old_shard
+            if old_path.is_symlink() or old_path.exists():
+                old_path.unlink()
+                print(f"    removed stale: {old_shard}")
 
+        # ── 清理旧的 config.json 备份（update_auto_map 生成的） ──
+        for backup in glob.glob(str(ckpt_dir / "config.json.back.*")):
+            os.remove(backup)
+            print(f"    removed stale backup: {Path(backup).name}")
+
+        # ── 为所有 base 文件创建软链接 ──
         for fname in ALL_BASE_FILES:
-            src  = base_dir / fname
+            src = base_dir / fname
             link = ckpt_dir / fname
+            # 强制模式或文件不存在时都重建
             if link.exists() or link.is_symlink():
                 if not force:
                     print(f"    skip (exists): {fname}")
                     continue
                 link.unlink()
-                print(f"    removed (force): {fname}")
 
             if not src.exists():
                 print(f"    WARN: base file not found, skip: {fname}")
@@ -188,12 +174,7 @@ def verify(ckpt_dirs: list[Path]) -> None:
         has_adapter  = (ckpt_dir / "lora_adapter" / "adapter_model.safetensors").exists()
         action_heads = sorted(f for f in files if "action_head" in f)
         has_stats    = "dataset_statistics.json" in files
-
-        # Check for stale 4-shard files
-        has_old_shards = any(
-            (ckpt_dir / f"model-0000{i}-of-00004.safetensors").exists()
-            for i in range(1, 5)
-        )
+        has_old_shards = any((ckpt_dir / s).exists() for s in STALE_FILES)
 
         ok = not missing_base and has_adapter and action_heads and has_stats and not has_old_shards
         if not ok:
@@ -206,7 +187,7 @@ def verify(ckpt_dirs: list[Path]) -> None:
         print(f"      action_head        : {action_heads if action_heads else '✗ MISSING'}")
         print(f"      dataset_statistics : {'✓' if has_stats else '✗ MISSING'}")
         if has_old_shards:
-            print(f"      ⚠️  WARNING: stale 4-shard files detected! Run with --force to clean up.")
+            print(f"      WARNING: stale 4-shard files still present!")
 
     print()
     if all_ok:
@@ -217,7 +198,7 @@ def verify(ckpt_dirs: list[Path]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Supplement fine-tuned ckpt dirs with openvla-7b base model files via symlinks."
+        description="Fix checkpoint directories: download correct base model + link OFT architecture files."
     )
     parser.add_argument(
         "--ckpt_root",
@@ -228,7 +209,7 @@ def main() -> None:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Delete and re-download/re-copy all base model files; rebuild all symlinks from scratch",
+        help="Remove all existing base files and rebuild from scratch (recommended for fixing broken checkpoints)",
     )
     args = parser.parse_args()
 
@@ -245,13 +226,13 @@ def main() -> None:
         print("Make sure each ckpt folder contains 'lora_adapter/' or 'dataset_statistics.json'.")
         raise SystemExit(1)
 
-    print(f"Found {len(ckpt_dirs)} checkpoint director(ies) under {ckpt_root}:")
+    print(f"Found {len(ckpt_dirs)} checkpoint(s) under {ckpt_root}:")
     for d in ckpt_dirs:
         print(f"  - {d.name}")
     print()
 
-    download_base_files(base_dir, force=args.force)
-    symlink_into_ckpts(ckpt_dirs, base_dir, force=args.force)
+    download_and_prepare_base(base_dir, force=args.force)
+    clean_and_link(ckpt_dirs, base_dir, force=args.force)
     verify(ckpt_dirs)
 
 
