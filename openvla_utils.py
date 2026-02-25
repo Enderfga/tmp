@@ -291,12 +291,31 @@ def get_vla(cfg: Any) -> torch.nn.Module:
 
     # Load LoRA adapter if present (saved separately during training with merge_lora_during_training=False)
     lora_adapter_dir = os.path.join(str(cfg.pretrained_checkpoint), "lora_adapter")
-    if os.path.isdir(lora_adapter_dir) and os.path.exists(os.path.join(lora_adapter_dir, "adapter_model.safetensors")):
+    print(f"\n{'='*60}")
+    print(f"[LoRA DEBUG] Checkpoint path: {cfg.pretrained_checkpoint}")
+    print(f"[LoRA DEBUG] LoRA adapter dir: {lora_adapter_dir}")
+    print(f"[LoRA DEBUG] Dir exists: {os.path.isdir(lora_adapter_dir)}")
+    if os.path.isdir(lora_adapter_dir):
+        contents = os.listdir(lora_adapter_dir)
+        print(f"[LoRA DEBUG] Dir contents: {contents}")
+        has_safetensors = os.path.exists(os.path.join(lora_adapter_dir, "adapter_model.safetensors"))
+        has_bin = os.path.exists(os.path.join(lora_adapter_dir, "adapter_model.bin"))
+        print(f"[LoRA DEBUG] Has .safetensors: {has_safetensors}, Has .bin: {has_bin}")
+    print(f"{'='*60}\n")
+
+    adapter_file = os.path.join(lora_adapter_dir, "adapter_model.safetensors")
+    if not os.path.exists(adapter_file):
+        adapter_file = os.path.join(lora_adapter_dir, "adapter_model.bin")
+    if os.path.isdir(lora_adapter_dir) and os.path.exists(adapter_file):
         from peft import PeftModel
         print(f"Loading LoRA adapter from {lora_adapter_dir}...")
         vla = PeftModel.from_pretrained(vla, lora_adapter_dir)
         vla = vla.merge_and_unload()
         print("LoRA adapter loaded and merged successfully.")
+    else:
+        print("[WARNING] LoRA adapter NOT loaded! Model running as base only.")
+        import sys
+        sys.exit("[FATAL] LoRA adapter not found. Refusing to run without fine-tuned weights.")
 
     # If using FiLM, wrap the vision backbone to allow for infusion of language inputs
     if cfg.use_film:
