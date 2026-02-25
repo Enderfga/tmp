@@ -53,11 +53,11 @@ from moviepy import ImageSequenceClip
 from scipy.spatial.transform import Rotation as R
 from PIL import Image
 
-# Add parent directory to path to import experiments modules
+# Add parent directory to path (for robot_utils and prismatic)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Import OpenVLA utilities
-from experiments.robot.openvla_utils import (
+# Import OpenVLA utilities — openvla_utils is local (in deploy/), robot_utils is in parent repo
+from openvla_utils import (
     get_vla,
     get_processor,
     get_action_head,

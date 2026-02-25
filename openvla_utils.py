@@ -32,7 +32,6 @@ from prismatic.vla.constants import (
     ACTION_PROPRIO_NORMALIZATION_TYPE,
 )
 from prismatic.vla.datasets.rlds.utils.data_utils import NormalizationType
-import random
 
 # Initialize important constants
 DATE = time.strftime("%Y_%m_%d")
@@ -262,7 +261,6 @@ def get_vla(cfg: Any) -> torch.nn.Module:
         torch.nn.Module: The initialized VLA model
     """
     print("Instantiating pretrained VLA policy...")
-    print(f"cfg.use_film: {cfg.use_film}")
 
     # If loading a locally stored pretrained checkpoint, check whether config or model files
     # need to be synced so that any changes the user makes to the VLA modeling code will
@@ -290,6 +288,15 @@ def get_vla(cfg: Any) -> torch.nn.Module:
         low_cpu_mem_usage=True,
         trust_remote_code=True,
     )
+
+    # Load LoRA adapter if present (saved separately during training with merge_lora_during_training=False)
+    lora_adapter_dir = os.path.join(str(cfg.pretrained_checkpoint), "lora_adapter")
+    if os.path.isdir(lora_adapter_dir) and os.path.exists(os.path.join(lora_adapter_dir, "adapter_model.safetensors")):
+        from peft import PeftModel
+        print(f"Loading LoRA adapter from {lora_adapter_dir}...")
+        vla = PeftModel.from_pretrained(vla, lora_adapter_dir)
+        vla = vla.merge_and_unload()
+        print("LoRA adapter loaded and merged successfully.")
 
     # If using FiLM, wrap the vision backbone to allow for infusion of language inputs
     if cfg.use_film:
@@ -405,8 +412,6 @@ def get_proprio_projector(cfg: Any, llm_dim: int, proprio_dim: int) -> ProprioPr
         ProprioProjector: The initialized proprio projector
     """
     # Initialize projector and move to device
-    if cfg.use_proprio == False:
-        return None
     proprio_projector = ProprioProjector(
         llm_dim=llm_dim,
         proprio_dim=proprio_dim,
@@ -504,9 +509,6 @@ def get_action_head(cfg: Any, llm_dim: int) -> Union[L1RegressionActionHead, Dif
             "moojink/openvla-7b-oft-finetuned-libero-goal": "action_head--50000_checkpoint.pt",
             "moojink/openvla-7b-oft-finetuned-libero-10": "action_head--150000_checkpoint.pt",
             "moojink/openvla-7b-oft-finetuned-libero-spatial-object-goal-10": "action_head--300000_checkpoint.pt",
-            "ZechenBai/OpenVLA-OFT": "action_head--12000_checkpoint.pt",
-            "ZechenBai/OpenVLA-OFT-OneCam-L1Reg": "action_head--latest_checkpoint.pt",
-            "ZechenBai/OpenVLA-OFT-Pick": "action_head--10000_checkpoint.pt",
         }
         if cfg.pretrained_checkpoint not in model_path_to_action_head_name.keys():
             raise ValueError("Unsupported HF Hub pretrained checkpoint found!")
@@ -672,6 +674,7 @@ def normalize_proprio(proprio: np.ndarray, norm_stats: Dict[str, Any]) -> np.nda
         proprio_high, proprio_low = np.array(norm_stats["q99"]), np.array(norm_stats["q01"])
     else:
         raise ValueError("Unsupported action/proprio normalization type detected!")
+
     normalized_proprio = np.clip(
         np.where(
             mask,
@@ -758,6 +761,7 @@ def get_vla_action(
 
         # Extract primary image and additional images
         primary_image = all_images.pop(0)
+
         # Build VLA prompt
         prompt = f"In: What action should the robot take to {task_label.lower()}?\nOut:"
 
@@ -778,26 +782,14 @@ def get_vla_action(
         proprio = None
         if cfg.use_proprio:
             proprio = obs["state"]
-            dataset_stats = vla.norm_stats[cfg.unnorm_key]
-            proprio_norm_stats = dataset_stats.get("proprio", dataset_stats["action"])
+            proprio_norm_stats = vla.norm_stats[cfg.unnorm_key]["proprio"]
             obs["state"] = normalize_proprio(proprio, proprio_norm_stats)
             proprio = obs["state"]
 
         # Generate action
         if action_head is None:
             # Standard VLA output (single-image inputs, discrete actions)
-            # action, _ = vla.predict_action(**inputs, unnorm_key=cfg.unnorm_key, do_sample=False)
-            action, _ = vla.predict_action(
-            # action, _ = vla.generate_action_verl(
-                **inputs,
-                unnorm_key=cfg.unnorm_key,
-                do_sample=False,
-                proprio=proprio,
-                proprio_projector=proprio_projector,
-                noisy_action_projector=noisy_action_projector,
-                action_head=action_head,
-                use_film=use_film,
-            )
+            action, _ = vla.predict_action(**inputs, unnorm_key=cfg.unnorm_key, do_sample=False)
         else:
             # Custom action head for continuous actions
             action, _ = vla.predict_action(
