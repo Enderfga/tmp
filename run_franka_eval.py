@@ -53,18 +53,19 @@ from moviepy import ImageSequenceClip
 from scipy.spatial.transform import Rotation as R
 from PIL import Image
 
-# Add parent directory to path (for robot_utils and prismatic)
+# Add parent directory to path (for prismatic package)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Import OpenVLA utilities — openvla_utils is local (in deploy/), robot_utils is in parent repo
+# Import OpenVLA utilities — all local (in deploy/), no external dependencies
 from openvla_utils import (
     get_vla,
     get_processor,
     get_action_head,
     get_proprio_projector,
     get_vla_action,
+    resize_image_for_policy,
 )
-from experiments.robot.robot_utils import (
+from robot_utils import (
     DATE_TIME,
     get_action,
     get_image_resize_size,
@@ -72,7 +73,10 @@ from experiments.robot.robot_utils import (
     normalize_gripper_action,
     set_seed_everywhere,
 )
-from prismatic.vla.constants import NUM_ACTIONS_CHUNK, PROPRIO_DIM
+
+# Constants (from prismatic.vla.constants — inlined to avoid external dependency)
+NUM_ACTIONS_CHUNK = 24
+PROPRIO_DIM = 8
 
 # Import local modules
 import camera_utils
@@ -492,7 +496,6 @@ def prepare_observation(external_img, wrist_img, robot, resize_size):
     external_img_rgb = np.array(external_img_rgb_pil)
     
     # Resize external image
-    from openvla_utils import resize_image_for_policy
     external_img_resized = resize_image_for_policy(external_img_rgb, resize_size)
     
     # Handle wrist image if present
