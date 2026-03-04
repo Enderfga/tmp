@@ -16,7 +16,7 @@ CUDA_DEVICE=0  # Which GPU to use
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/ckpt_log/openvla-7b+pick_n_place_ee+b16+lr-0.0005+lora-r32+dropout-0.0--nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--10000_chkpt"
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/ckpt_log/openvla-7b+pick_n_place_ee+b16+lr-0.0005+lora-r32+dropout-0.4--nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--6000_chkpt"
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/VLAST_ckpt/openvla-7b+pick_n_place_ee+b16+lr-5e-05+lora-r32+dropout-0.1--image_aug--VLAST_noq99_nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--9000_chkpt"
-CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt/cotrain-v2-5000_chkpt"
+CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt/cotrain-v2-5000_chkpt/cotrain-v2-5000_chkpt"
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/tube_ckpt/openvla-7b+pick_n_place_ee+b16+lr-5e-05+lora-r32+dropout-0.1--image_aug--tube_noq99_nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--2000_chkpt"
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/tube_ckpt/openvla-7b+pick_n_place_ee+b16+lr-5e-05+lora-r32+dropout-0.2--tube_noq99_nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--800_chkpt"
 

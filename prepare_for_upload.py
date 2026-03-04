@@ -5,7 +5,7 @@ prepare_for_upload.py
 运行一次即可修复所有权重问题（自动清理旧的错误文件）。
 
 用法:
-    python3 prepare_for_upload.py --ckpt_root /home/guian/checkpoints --force
+    python3 /home/showlab/openvla-oft/franka_openvla/prepare_for_upload.py --ckpt_root /home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt --force
 
 脚本会：
   1. 清理旧的错误文件（4-shard LIBERO 权重、过期 config 备份等）

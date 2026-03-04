@@ -54,25 +54,36 @@ class RealSenseCamera:
         self.manual_exposure = manual_exposure
         self.pipeline = None
         self.config = None
-        
+
+        # Hardware-reset the device first to clear stale USB state
+        # (prevents "Frame didn't arrive" errors from previous crashed sessions)
+        if serial_number and REALSENSE_AVAILABLE:
+            ctx = rs.context()
+            for dev in ctx.query_devices():
+                if dev.get_info(rs.camera_info.serial_number) == serial_number:
+                    print(f"  Hardware-resetting camera {serial_number}...")
+                    dev.hardware_reset()
+                    break
+            time.sleep(3)  # Wait for device to re-enumerate
+
         # Try to initialize camera with retries
         for attempt in range(1, max_retries + 1):
             try:
                 print(f"Starting RealSense camera {serial_number or 'default'} (attempt {attempt}/{max_retries})...")
-                
+
                 # Reset pipeline and config for each attempt
                 if self.pipeline is not None:
                     try:
                         self.pipeline.stop()
                     except:
                         pass
-                
+
                 self.pipeline = rs.pipeline()
                 self.config = rs.config()
-                
+
                 if serial_number:
                     self.config.enable_device(serial_number)
-                
+
                 self.config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
                 if enable_depth:
                     self.config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
@@ -82,8 +93,14 @@ class RealSenseCamera:
                 
                 # Set exposure settings after pipeline starts
                 device = profile.get_device()
-                color_sensor = device.first_color_sensor()
-                
+
+                # D405 has no dedicated color sensor; fall back to depth stereo sensor
+                try:
+                    color_sensor = device.first_color_sensor()
+                except RuntimeError:
+                    color_sensor = device.first_depth_sensor()
+                    print(f"  No color sensor found, using depth sensor for exposure control (D405?)")
+
                 if self.manual_exposure is not None:
                     # Manual exposure mode
                     if color_sensor.supports(rs.option.enable_auto_exposure):
@@ -98,15 +115,15 @@ class RealSenseCamera:
                         print(f"  Auto exposure enabled")
                 else:
                     print(f"  Using default exposure settings")
-                
+
                 # Set white balance to auto (default)
                 if color_sensor.supports(rs.option.enable_auto_white_balance):
                     color_sensor.set_option(rs.option.enable_auto_white_balance, True)
                     print(f"  Auto white balance enabled")
                 
-                # Warm up camera - try to read a few frames
+                # Warm up camera - read enough frames for auto white balance to settle
                 print(f"  Warming up camera...")
-                for i in range(3):
+                for i in range(30):
                     self.pipeline.wait_for_frames(timeout_ms=1000)
                 
                 print(f"✓ RealSense camera {serial_number or 'default'} ready!")
@@ -144,11 +161,12 @@ class RealSenseCamera:
         """
         try:
             frames = self.pipeline.wait_for_frames(timeout_ms=1000)
+
             color_frame = frames.get_color_frame()
-            
+
             if not color_frame:
                 return False, None, None
-            
+
             color_image = np.asanyarray(color_frame.get_data())
             
             depth_image = None

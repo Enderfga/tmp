@@ -21,12 +21,13 @@ CUDA_DEVICE=0  # Which GPU to use
 # CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/tube_ckpt/openvla-7b+pick_n_place_ee+b16+lr-5e-05+lora-r32+dropout-0.2--tube_noq99_nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--3rd_person_img--no_aug--800_chkpt"
 
 # RL Posttrain ckpts
-CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/Danze_orange_cube_ckpt/orange_cube"
+CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/danze_orange_cube_ckpt/orange_cube_filter_2e-3/openvla-7b+pick_n_place_ee+b16+lr-0.0005+lora-r32+dropout-0.1--image_aug--orange_cube_noq99_nonorm_nol1_parallel_dec--24_acts_chunk--l1_reg--no_aug--15000_chkpt"
 UNNORM_KEY="pick_n_place_ee"  # Your custom unnorm key
 
 # Camera serials (UPDATE THESE WITH YOUR CAMERA SERIALS)
-EXTERNAL_CAMERA="317222075319"
-#EXTERNAL_CAMERA="336222073740"
+# EXTERNAL_CAMERA="317222075319"
+# EXTERNAL_CAMERA="327122079691"
+EXTERNAL_CAMERA="336222073740"
 WRIST_CAMERA="218622273043"
 
 # Robot connection (UPDATE WITH YOUR NUC IP)
@@ -37,6 +38,7 @@ NUC_PORT=4242
 # INSTRUCTION="place the cube on the purple gear"
 INSTRUCTION="Pick up the orange cube and put it on the green pad."
 # INSTRUCTION="Pick up the test cube with the orange cap and put it in the grey cup."
+# INSTRUCTION="Pick up the grey cup and place it on the green plate."
 
 # Evaluation settings
 NUM_TRIALS=61

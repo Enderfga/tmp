@@ -8,25 +8,13 @@
 # Configuration
 CUDA_DEVICE=0  # Which GPU to use
 
-# ── Franka Pick-and-Place Checkpoints (Enderfga/vla on HuggingFace) ──────────
-# Three fine-tuned checkpoints, all trained on 25 real episodes with LoRA r32.
-# Download the desired subfolder from HF and set CHECKPOINT to its local path.
-# e.g.: huggingface-cli download Enderfga/vla franka_pick_place_auxloss_step9000 --local-dir /home/guian/checkpoints
-
-# Exp A — Baseline (25 real ep only, step 8000, final loss 0.0503)
-# CHECKPOINT="/home/guian/checkpoints/franka_pick_place_baseline_step8000"
-
-# Exp B — Mix/IDM (real + IDM pseudo-labeled synth, step 6000, final loss 0.0371)
-# CHECKPOINT="/home/guian/checkpoints/franka_pick_place_mix_idm_step6000"
-
-# Exp C — AuxLoss (real + self-supervised synth TCL+TFP, step 9000, final loss 0.0376)  ← ACTIVE
-CHECKPOINT="/home/guian/checkpoints/franka_pick_place_auxloss_step9000"
+CHECKPOINT="/home/showlab/openvla-oft/openvla-oft-xk/guian_ckpt/baseline"
 
 UNNORM_KEY="pick_n_place_ee"  # dataset_statistics key used during training
 
 # Camera serials (UPDATE THESE WITH YOUR CAMERA SERIALS)
 # EXTERNAL_CAMERA="317222075319"
-EXTERNAL_CAMERA="327122079691"
+EXTERNAL_CAMERA="336222073740"
 WRIST_CAMERA="218622273043"
 
 # Robot connection (UPDATE WITH YOUR NUC IP)
